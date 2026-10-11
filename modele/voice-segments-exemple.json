@@ -1,0 +1,74 @@
+{
+ "file": "audio/voix-prise1.mp3",
+ "voice": "Exemple fictif : une voix iziVoice, vitesse 1.0, une seule prise pour tout le texte",
+ "tempo": 1.0,
+ "lead": 0.6,
+ "tail": 3.6,
+ "inserts": [
+  {
+   "at": 6.1,
+   "dur": 0.4,
+   "why": "respiration après l'accroche"
+  },
+  {
+   "at": 17.8,
+   "dur": 0.5,
+   "why": "le prix reste affiché"
+  },
+  {
+   "at": 24.3,
+   "dur": 0.9,
+   "why": "le numéro reste affiché"
+  }
+ ],
+ "segments": [
+  [
+   "accroche",
+   0.0,
+   2.9,
+   "Vous voulez enfin maîtriser votre métier ?"
+  ],
+  [
+   "titre",
+   3.0,
+   6.1,
+   "Formez-vous en seulement trois semaines."
+  ],
+  [
+   "contenu",
+   6.5,
+   10.8,
+   "Vingt-quatre heures de pratique, cent pour cent à distance."
+  ],
+  [
+   "cible",
+   11.0,
+   14.2,
+   "Pour les techniciens, les ingénieurs et les entrepreneurs."
+  ],
+  [
+   "prix",
+   14.5,
+   17.8,
+   "Cent soixante-quinze mille francs C F A seulement."
+  ],
+  [
+   "quinze",
+   18.3,
+   21.0,
+   "Réduction pour les quinze premiers inscrits !"
+  ],
+  [
+   "contact",
+   21.2,
+   24.3,
+   "Appelez ou écrivez-nous sur WhatsApp, au zéro un, soixante-douze…"
+  ],
+  [
+   "logo",
+   25.2,
+   27.0,
+   "Votre marque. Votre avenir commence ici."
+  ]
+ ]
+}

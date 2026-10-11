@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Modèle de spot motion design (4 formats)</title>
+<script>
+/* ============================================================
+   MODÈLE DE SPOT MOTION DESIGN (issu d'un vrai spot client, 08/10/2026)
+   Formats : ?f=169 · 916 · 11 · 45     Calage : timeline.js (node tools/timeline-voice.mjs voice-segments.json)
+   Règle d'or : render(t) est pure et toutes les animations partent des mots de la voix (qs('cue')).
+   ============================================================ */
+window.CFG = {
+  colors: { navy: '#072B69', deep: '#04183D', blue: '#209CFD', green: '#71BC47', greenDark: '#319A4C', ink: '#4A5B7A' },
+  titre: 'Votre {G:titre} ici',
+};
+</script>
+<script src="timeline.js"></script>
+<script src="media-available.js"></script>
+<style>
+@font-face { font-family: NM; src: url(assets/fonts/NeueMontreal-Bold.otf); font-weight: 700; }
+@font-face { font-family: NM; src: url(assets/fonts/NeueMontreal-Medium.otf); font-weight: 500; }
+@font-face { font-family: NM; src: url(assets/fonts/NeueMontreal-Regular.otf); font-weight: 400; }
+html, body { margin: 0; height: 100%; background: #0c1220; overflow: hidden; }
+#stage { position: absolute; left: 0; top: 0; transform-origin: 0 0; overflow: hidden; background: #fff;
+  font-family: NM, Arial, sans-serif; color: #072B69; }
+.scene { position: absolute; inset: 0; overflow: hidden; transform-origin: 50% 50%; }
+.w { display: inline-block; white-space: nowrap; }
+.l { display: inline-block; will-change: transform, filter, opacity; }
+.G { background: linear-gradient(90deg, #209CFD 0%, #71BC47 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.mask { position: absolute; overflow: hidden; padding: .06em .02em .14em; white-space: nowrap; }
+.mask > div { display: inline-block; will-change: transform; }
+.card { position: absolute; background: #fff; border-radius: 28px; border: 1px solid #E3ECF7;
+  box-shadow: 0 40px 80px rgba(7, 43, 105, .14), 0 6px 18px rgba(7, 43, 105, .06); overflow: hidden; }
+.glass { position: absolute; border-radius: 30px; background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.12);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 40px 90px rgba(0,0,0,.25); }
+.pill { position: absolute; display: flex; align-items: center; justify-content: center; border-radius: 999px; font-weight: 700; white-space: nowrap; }
+.win { position: absolute; background: #fff; border-radius: 18px; overflow: hidden; box-shadow: 0 50px 100px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.3); }
+.bar { height: 46px; background: #F1F4F9; border-bottom: 1px solid #E1E7F0; display: flex; align-items: center; padding: 0 16px; gap: 9px; }
+.dot { width: 13px; height: 13px; border-radius: 7px; }
+#ui { position: fixed; left: 0; right: 0; bottom: 0; height: 54px; background: rgba(8, 14, 28, .92); display: flex; align-items: center;
+  gap: 14px; padding: 0 16px; font: 14px -apple-system, sans-serif; color: #cfe3ff; z-index: 10; }
+#ui button { background: #209CFD; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+#ui input { flex: 1; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="ui"><button id="play">Lecture</button><input id="scrub" type="range" min="0" max="1000" value="0"><span id="tc">0.00 s</span></div>
+<audio id="audio" preload="auto"></audio>
+<script>
+(() => {
+const C = CFG.colors, TL = window.TL, Q = TL.cues;
+const PRM = new URLSearchParams(location.search);
+const RENDER = PRM.has('render');
+/* ---------- formats : chaque scène a sa mise en page ---------- */
+const F = PRM.get('f') || '169';
+const W = F === '169' ? 1920 : 1080, H = { 169: 1080, 916: 1920, 11: 1080, 45: 1350 }[F];
+const OY = F === '45' ? 135 : 0;                         // 4:5 = mise en page carrée centrée en hauteur
+const WIDE = F === '169', V = F === '916', SQ = F === '11' || F === '45';
+const L = (a, v, s) => WIDE ? a : V ? v : s;              // valeur selon le format
+const Y = (a, v, s) => WIDE ? a : V ? v : s + OY;         // ordonnée selon le format
+const S = document.getElementById('stage');
+S.style.width = W + 'px'; S.style.height = H + 'px';
+
+/* ---------- maths ---------- */
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const eOut = p => 1 - Math.pow(1 - p, 3);
+const eIn = p => p * p * p;
+const eIO = p => p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const eX = p => p >= 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const eXIO = p => p <= 0 ? 0 : p >= 1 ? 1 : p < .5 ? Math.pow(2, 20 * p - 10) / 2 : (2 - Math.pow(2, -20 * p + 10)) / 2;
+const eBack = p => { const c1 = 1.55, c3 = c1 + 1; return 1 + c3 * Math.pow(p - 1, 3) + c1 * Math.pow(p - 1, 2); };
+const env = t => TL.env[clamp(Math.round(t * TL.fps), 0, TL.env.length - 1)] || 0;
+const fmt = n => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const rnd = (s => () => (s = (s * 16807) % 2147483647) / 2147483647)(7);
+const qs = k => Q[k].start, qe = k => Q[k].end;
+
+/* ---------- DOM ---------- */
+const el = (tag, css = {}, parent = S, cls = '') => { const e = document.createElement(tag); if (cls) e.className = cls; Object.assign(e.style, css); parent.appendChild(e); return e; };
+const div = (css, parent, cls) => el('div', css, parent, cls);
+const img = (src, css, parent) => { const i = el('img', css, parent); i.src = src; return i; };
+const px = v => v + 'px';
+const set = (e, o) => { for (const k in o) e.style[k] = o[k]; };
+const vis = (e, on) => { if (e._d === undefined) e._d = e.style.display; e.style.display = on ? e._d : 'none'; };
+const NS = 'http://www.w3.org/2000/svg';
+const svg = (tag, attrs = {}, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; };
+const svgBox = (parent, w, h, css = {}) => { const s = svg('svg', { width: w, height: h, viewBox: `0 0 ${w} ${h}` }); Object.assign(s.style, { position: 'absolute', overflow: 'visible' }, css); parent.appendChild(s); return s; };
+const pick = (...f) => f.find(x => (window.AVAILABLE || []).includes(x)) || f[f.length - 1];
+const rich = s => s.replace(/\{g:([^}]*)\}/g, `<span style="color:${C.green}">$1</span>`).replace(/\{b:([^}]*)\}/g, `<span style="color:${C.blue}">$1</span>`).replace(/\{G:([^}]*)\}/g, '<span class="G">$1</span>');
+const draw = (p, k) => { const Ln = p._len || (p._len = p.getTotalLength()); p.setAttribute('stroke-dasharray', Ln); p.setAttribute('stroke-dashoffset', Ln * (1 - clamp(k))); };
+// cadre : un bloc construit à sa taille d'origine, placé et mis à l'échelle selon le format
+const frame = (parent, [x, y, s = 1], css = {}) => div(Object.assign({ position: 'absolute', left: px(x), top: px(y), transform: `scale(${s})`, transformOrigin: '0 0' }, css), parent);
+// rangée centrée (pour poser une pastille ou un bloc au centre)
+const row = (parent, top, css = {}) => div(Object.assign({ position: 'absolute', left: 0, width: px(W), top: px(top), display: 'flex', justifyContent: 'center', alignItems: 'center' }, css), parent);
+
+function text(parent, str, css = {}) {
+  const box = div(Object.assign({ position: 'absolute', whiteSpace: 'nowrap' }, css), parent);
+  const letters = [], parts = [];
+  str.replace(/\{([gbG]):([^}]*)\}|([^{]+)/g, (m, k, inner, plain) => { parts.push(plain != null ? [plain, null] : [inner, k]); });
+  parts.forEach(([s, k]) => {
+    s.split(/( )/).forEach(word => {
+      if (word === ' ') { box.appendChild(document.createTextNode(' ')); return; }
+      if (!word) return;
+      const w = el('span', {}, box, 'w');
+      [...word].forEach(ch => { const l = el('span', k === 'g' ? { color: C.green } : k === 'b' ? { color: C.blue } : {}, w, k === 'G' ? 'l G' : 'l'); l.textContent = ch; letters.push(l); });
+    });
+  });
+  return { box, letters };
+}
+function anim(T, t, tIn, tOut = 1e9, o = {}) {
+  const st = o.stagger ?? .022, dur = o.dur ?? .62, n = T.letters.length, outSt = o.outStagger ?? .012;
+  T.letters.forEach((l, i) => {
+    const p = prog(t, tIn + i * st, tIn + i * st + dur), q = prog(t, tOut + i * outSt, tOut + i * outSt + .42);
+    const e = eBack(p), f = eOut(p);
+    const y = (1 - e) * .62 - eIn(q) * .55, r = (1 - e) * 11, b = (1 - f) * 9 + q * 8;
+    l.style.transform = `translateY(${y}em) rotate(${r}deg)`;
+    l.style.filter = b > .05 ? `blur(${b}px)` : 'none';
+    l.style.opacity = Math.min(clamp(p * 2.4), 1 - q);
+  });
+  vis(T.box, !(t < tIn - .05 || t > tOut + n * outSt + .5));
+}
+function mline(parent, str, css) { const box = div(css, parent, 'mask'); const inner = div({}, box); inner.innerHTML = rich(str); return { box, inner }; }
+function rline(Ln, t, tIn, tOut = 1e9, o = {}) {
+  const p = eX(prog(t, tIn, tIn + (o.dur ?? .9))), q = eIn(prog(t, tOut, tOut + .45));
+  Ln.inner.style.transform = `translateY(${(1 - p) * 118 - q * 118}%) skewY(${(1 - p) * 6}deg)`;
+  vis(Ln.box, t > tIn - .02 && t < tOut + .5);
+}
+// titre sur 1 ligne (16:9) ou coupé en 2 lignes (vertical / carré)
+const mtitle = (parent, one, two, css, lh) => (WIDE ? [one] : two).map((s, i) => mline(parent, s, Object.assign({}, css, { top: px(parseFloat(css.top) + i * lh) })));
+const pop = (e, t, a, d = .55, base = '') => { const p = prog(t, a, a + d); set(e, { opacity: clamp(p * 3), transform: `${base} scale(${eBack(p)})` }); return p; };
+
+const inS = (k, t, pre = 0, post = 0) => t >= T[k][0] - pre && t < T[k][1] + post;   // T est défini plus bas
+
+/* ---------- briques communes ---------- */
+const MEDIA = [];
+function addMedia(parent, src, a, b, o = {}) {
+  const wrap = div({ position: 'absolute', inset: 0, overflow: 'hidden' }, parent);
+  const isV = /\.(webm|mp4)$/.test(src);
+  const m = el(isV ? 'video' : 'img', { position: 'absolute', left: 0, top: 0, width: px(W), height: px(H), objectFit: 'cover', objectPosition: o.pos || '50% 50%' }, wrap);
+  if (isV) { m.muted = true; m.preload = 'auto'; m.playsInline = true; }
+  m.src = src;
+  if (o.overlay) div({ position: 'absolute', inset: 0, background: o.overlay }, wrap);
+  const M = { wrap, m, isV, a, b, fi: o.fi ?? 0, fo: o.fo ?? 0, kb: o.kb || [1.1, 1.0], pan: o.pan || [0, 0, 0, 0], wipe: o.wipe, off: o.off || 0, rate: o.rate || 1 };
+  MEDIA.push(M); return M;
+}
+function renderMedia(t) {
+  for (const M of MEDIA) {
+    const on = t > M.a - M.fi && t < M.b + M.fo; vis(M.wrap, on); if (!on) { M.want = null; continue; }
+    const p = prog(t, M.a - M.fi, M.b + M.fo);
+    const fin = eIO(prog(t, M.a - M.fi, M.a)), fout = prog(t, M.b, M.b + M.fo);
+    M.m.style.transform = `translate(${lerp(M.pan[0], M.pan[2], p)}px, ${lerp(M.pan[1], M.pan[3], p)}px) scale(${lerp(M.kb[0], M.kb[1], p)})`;
+    if (M.wipe) { M.wrap.style.clipPath = `inset(0 0 0 ${(1 - fin) * 100}%)`; M.wrap.style.opacity = 1 - fout; }
+    else M.wrap.style.opacity = M.fi ? Math.min(fin, 1 - fout) : 1 - fout;
+    if (M.isV) M.want = clamp(M.off + (t - (M.a - M.fi)) * M.rate, 0, (M.m.duration || 12) - .05);
+  }
+}
+function dust(parent, n, o = {}) {
+  const D = div({ position: 'absolute', inset: 0, pointerEvents: 'none', mixBlendMode: o.blend || 'screen' }, parent);
+  const P = [...Array(n)].map(() => {
+    const r = 4 + rnd() * (o.max || 26);
+    const d = div({ position: 'absolute', width: px(r * 2), height: px(r * 2), borderRadius: '50%', background: `radial-gradient(circle, ${o.color || 'rgba(255,236,190,.9)'} 0%, rgba(255,236,190,0) 70%)` }, D);
+    return { d, x: rnd() * W, y: rnd() * H, v: 12 + rnd() * 40, ph: rnd() * 6.28, a: .25 + rnd() * .75 };
+  });
+  return { render(t, alpha = 1) { P.forEach(q => { const y = ((q.y - t * q.v) % (H + 80) + H + 80) % (H + 80) - 40; set(q.d, { transform: `translate(${q.x + 30 * Math.sin(t * .5 + q.ph)}px, ${y}px)`, opacity: alpha * q.a * (.6 + .4 * Math.sin(t * 1.7 + q.ph)) }); }); } };
+}
+function leak(parent, color = 'rgba(255,210,130,.55)') { return div({ position: 'absolute', width: '1400px', height: '1400px', borderRadius: '50%', background: `radial-gradient(circle, ${color} 0%, rgba(255,200,120,0) 62%)`, mixBlendMode: 'screen', pointerEvents: 'none' }, parent); }
+let wvN = 0;
+function waves(parent, o = {}) {
+  const sv = svgBox(parent, W, H, { left: 0, top: 0 }); const id = 'wv' + (wvN++);
+  const lg = svg('linearGradient', { id, x1: 0, y1: 0, x2: 1, y2: 0 }, svg('defs', {}, sv));
+  svg('stop', { offset: 0, 'stop-color': C.blue }, lg); svg('stop', { offset: 1, 'stop-color': C.green }, lg);
+  const ps = [...Array(14)].map(() => svg('path', { fill: 'none', stroke: `url(#${id})`, 'stroke-width': 1.6 }, sv));
+  const base = (o.base ?? 1010) + (H - 1080);
+  return (t, alpha = 1) => {
+    const a = 30 + 44 * env(t);
+    ps.forEach((w, i) => {
+      let d = '';
+      for (let x = -40; x <= W + 40; x += 40) { const y = base - x * .3 + (i - 7) * 15 + a * Math.sin(x * .0031 + i * .23 + t * .55) + 70 * Math.sin(x * .0012 - t * .22 + i * .04); d += (x < -39 ? 'M' : 'L') + x + ' ' + y.toFixed(1) + ' '; }
+      w.setAttribute('d', d); w.setAttribute('opacity', (alpha * (.1 + .2 * (1 - Math.abs(i - 7) / 7))).toFixed(3));
+    });
+  };
+}
+// image de marque (vagues bleu/vert + panneaux) en fond des scènes claires
+const brandBg = (parent, op) => img('assets/brand-waves.jpg', Object.assign({ position: 'absolute', opacity: op },
+  WIDE ? { left: 0, bottom: '-900px', width: '1920px' } : V ? { left: '-160px', top: '-100px', width: '1400px' } : { left: 0, bottom: px(-500 + OY), width: '1080px' }), parent);
+function pill(parent, label, css) { const p = div(Object.assign({ background: C.green, color: '#fff' }, css), parent, 'pill'); p.innerHTML = label; return p; }
+const ICON = {
+  phone: (p, s = 60, c = '#fff') => { const v = svgBox(p, s, s, { position: 'relative' }); v.setAttribute('viewBox', '0 0 24 24'); svg('path', { d: 'M6.6 10.8c1.4 2.8 3.8 5.1 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z', fill: c }, v); return v; },
+  wa: (p, s = 60) => { const v = svgBox(p, s, s, { position: 'relative', flex: 'none' }); v.setAttribute('viewBox', '0 0 128 128');
+    svg('circle', { cx: 64, cy: 64, r: 62, fill: '#25D366' }, v);
+    svg('path', { d: 'M64 26 C43 26 26 42 26 63 C26 70 28 77 32 83 L27 101 L46 96 C51 99 57 101 64 101 C85 101 102 84 102 63 C102 42 85 26 64 26 Z', fill: 'none', stroke: '#fff', 'stroke-width': 7, 'stroke-linejoin': 'round' }, v);
+    svg('path', { d: 'M50 47 C48 47 45 49 45 54 C45 59 49 65 53 70 C58 76 66 81 72 82 C77 83 80 80 81 77 C82 75 81 74 79 73 L72 69 C70 68 69 69 68 70 L66 72 C62 71 57 66 55 62 L57 60 C58 59 59 58 58 56 L55 49 C54 47 52 47 50 47 Z', fill: '#fff' }, v); return v; },
+  check: (p, s = 40, c = C.green) => { const v = svgBox(p, s, s, { position: 'relative', flex: 'none' }); v.setAttribute('viewBox', '0 0 40 40'); svg('circle', { cx: 20, cy: 20, r: 19, fill: c }, v); svg('path', { d: 'M12 20.5 L17.5 26 L28.5 14.5', fill: 'none', stroke: '#fff', 'stroke-width': 4, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, v); return v; },
+  globe: (p, s = 40, c = '#fff') => { const v = svgBox(p, s, s, { position: 'relative', flex: 'none' }); v.setAttribute('viewBox', '0 0 40 40'); const g = { fill: 'none', stroke: c, 'stroke-width': 2.6 }; svg('circle', { cx: 20, cy: 20, r: 17, ...g }, v); svg('ellipse', { cx: 20, cy: 20, rx: 7.5, ry: 17, ...g }, v); svg('path', { d: 'M3 20 H37 M6 11 H34 M6 29 H34', ...g }, v); return v; },
+};
+
+
+/* =====================================================================
+   SCÈNE D'EXEMPLE — titre révélé derrière un masque + pastille + compteur
+   Copier ce bloc pour chaque scène : div 'scene' + éléments + renderN(t).
+   ===================================================================== */
+const T = { s1: [0, TL.duration] };
+const s1 = div({ background: C.deep }, S, 'scene');
+const d1 = dust(s1, 30);
+const badge = pill(s1, 'FORMATION', { left: px(L(150, 60, 50)), top: px(Y(300, 600, 300)), height: '62px', padding: '0 30px', fontSize: '27px' });
+const titre = mline(s1, CFG.titre, { left: px(L(140, 50, 40)), top: px(Y(390, 690, 390)), fontSize: px(L(110, 96, 80)), fontWeight: 700, color: '#fff', letterSpacing: '-4px' });
+const compteur = div({ position: 'absolute', left: px(L(150, 60, 50)), top: px(Y(560, 860, 540)), fontSize: '120px', fontWeight: 700, color: C.green }, s1);
+function render1(t) {
+  d1.render(t, 1);
+  const p = eBack(prog(t, .3, .8)); set(badge, { opacity: clamp(p * 3), transform: `scale(${p})`, transformOrigin: '0 50%' });
+  rline(titre, t, .6);
+  compteur.textContent = fmt(175000 * eOut(prog(t, 1.2, 2.4)));
+}
+function render(t) { renderMedia(t); render1(t); }
+window.render = render; window.T = T; window.FMT = { F, W, H };
+
+/* ---------- mise à l'échelle, préchargement, lecture ---------- */
+function fit() { const sc = RENDER ? 1 : Math.min(innerWidth / W, (innerHeight - 54) / H); S.style.transform = `scale(${sc})`; S.style.left = RENDER ? '0' : px((innerWidth - W * sc) / 2); }
+fit(); addEventListener('resize', fit);
+const audio = document.getElementById('audio');
+const ready = Promise.all([document.fonts.ready, ...[...document.images].map(i => i.decode().catch(() => {}))]);
+const seekAll = () => Promise.all(MEDIA.filter(M => M.isV && M.want != null).map(M => new Promise(res => {
+  if (M.m.readyState >= 2 && Math.abs(M.m.currentTime - M.want) < 1e-3) return res();
+  M.m.addEventListener('seeked', () => res(), { once: true }); M.m.currentTime = M.want;
+})));
+const vidsReady = Promise.all(MEDIA.filter(M => M.isV).map(M => M.m.readyState >= 1 ? 1 : new Promise(r => { M.m.onloadedmetadata = r; M.m.onerror = r; })));
+window.renderAt = async t => { await ready; await vidsReady; render(t); await seekAll(); };
+window.ready = ready;
+if (RENDER) { document.getElementById('ui').style.display = 'none'; ready.then(() => render(0)); return; }
+audio.src = 'audio/mix.wav'; audio.onerror = () => { audio.onerror = null; audio.src = 'audio/voice.wav'; };
+const play = document.getElementById('play'), scrub = document.getElementById('scrub'), tc = document.getElementById('tc');
+play.onclick = () => { if (audio.paused) { audio.play(); play.textContent = 'Pause'; } else { audio.pause(); play.textContent = 'Lecture'; } };
+scrub.oninput = () => { audio.currentTime = scrub.value / 1000 * TL.duration; };
+const hashT = parseFloat(location.hash.slice(1));
+ready.then(() => { if (!isNaN(hashT)) audio.currentTime = hashT; (function loop() { const t = audio.currentTime || (isNaN(hashT) ? 0 : hashT); render(t); MEDIA.forEach(M => { if (!M.isV || M.want == null) return; if (audio.paused) { if (Math.abs(M.m.currentTime - M.want) > .04) M.m.currentTime = M.want; M.m.pause(); } else { if (M.m.paused) M.m.play().catch(() => {}); if (Math.abs(M.m.currentTime - M.want) > .25) M.m.currentTime = M.want; } }); scrub.value = t / TL.duration * 1000; tc.textContent = t.toFixed(2) + ' s'; requestAnimationFrame(loop); })(); });
+})();
+</script>
+</body>
+</html>
